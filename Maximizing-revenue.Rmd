@@ -1,0 +1,335 @@
+ 
+
+Objective: This project's main goal is to run an A/B test to examine the relationship between the total fare and the method of payment. We use R language for hypothesis testing and descriptive statistics to extract useful information that can help taxi drivers generate more revenue. In particular, we want to find out if there is a big difference in the fares for those who pay with credit cards versus those who pay with cash and also to explore the relationship between trip duration and fare amount. 
+```{r}
+file_path <- "C:/Users/B00917435/OneDrive - Ulster University/Downloads/yellow_tripdata_2020-01.csv"
+# Read data from the CSV file
+data <- read.csv(file_path)
+# Check the structure of the data
+str(data)
+
+#view the first few rows of the data
+head(data)
+```
+```{r}
+# converting pickup and dropoff to datetime
+data$tpep_pickup_datetime <- as.POSIXct(data$tpep_pickup_datetime, format = "%Y-%m-%d %H:%M:%S")
+data$tpep_dropoff_datetime <- as.POSIXct(data$tpep_dropoff_datetime, format = "%Y-%m-%d %H:%M:%S")
+str(data)
+```
+```{r}
+# Calculating duration from the pickup and dropoff datetime in minutes
+
+data$duration <- data$tpep_dropoff_datetime - data$tpep_pickup_datetime
+# converting into minutes
+data$duration <- as.numeric(data$duration)/60
+data
+```
+There are so many columns in the dataset, but as per our problem statement, we only require some fields from the original data. Rest columns are nothing but the unwanted columns for this study. So we will simply remove those columns.
+
+As the problem statement is revolving around the payment type, fare amount, and any other factor influencing the fare amount, we will filter the data to have only passenger count, trip distance, payment type, fare amount and duration of the trip.
+```{r}
+filtered_data <- data[, c("passenger_count","payment_type","fare_amount","trip_distance","duration")]
+filtered_data
+```
+```{r}
+# check for missing values
+install.packages("dplyr")
+library(dplyr)
+na_count <- sum(is.na(filtered_data))
+na_count
+```
+```{r}
+# Calculate the total number of rows in filtered_data
+total_rows <- nrow(filtered_data)
+
+# Calculate the percentage of NULL values
+percentage_null <- (na_count / total_rows) * 100
+percentage_null
+
+```
+```{r}
+# as the data has only 1% of data missing, we can simply drop the records with missing values.
+# Dropping the rows with NULL values from filtered_data
+filtered_data<- na.omit(filtered_data)
+filtered_data
+```
+```{r}
+# Check for duplicate rows in filtered_data
+duplicate_rows <- filtered_data[duplicated(filtered_data), ]
+duplicate_rows
+```
+```{r}
+# Removing duplicate rows from filtered_data as they will not be able to contribute in analysis
+filtered_data <- unique(filtered_data)
+filtered_data
+```
+```{r}
+# passenger count distribution
+value_counts_passengers <- count(filtered_data, passenger_count)
+value_counts_passengers
+```
+```{r}
+# payment type distribution
+value_counts_payment <- count(filtered_data, payment_type)
+value_counts_payment
+```
+We will focus solely on payment types 'card' and 'cash,' denoted by 1 and 2 in the dataset. To ensure our analysis centers on these payment methods, we'll filter the data accordingly, excluding all other types.
+
+Moreover, examining the distribution of passenger counts reveals that trips with more than 5 passengers are rare. Additionally, trips with 0 passengers are impossible, as we expect at least one passenger to pay the fare amount. Therefore, we will filter the passenger count to include only values ranging from 1 to 5.
+```{r}
+# Filter rows where payment_type (number of passengers) is less than 3
+filtered_data <- filtered_data[filtered_data$payment_type < 3, ]
+
+# Filter rows where passenger_count (payment type) is greater than 0 and less than 6
+filtered_data <- filtered_data[filtered_data$passenger_count > 0 & filtered_data$passenger_count < 6, ]
+
+# Show filtered dataframe
+filtered_data
+```
+```{r}
+# replacing the payment type encoded value 1 and 2 to Card and Cash
+
+filtered_data$payment_type <- ifelse(filtered_data$payment_type == 1, "card",
+                                     ifelse(filtered_data$payment_type == 2, "cash", filtered_data$payment_type))
+filtered_data
+```
+```{r}
+# Statistical summary of data
+summary(filtered_data)
+```
+Upon reviewing the provided statistics, it's evident that the minimum values for trip distance, fare amount, and duration are negative, which is unrealistic and invalid for further analysis. Consequently, we will eliminate these negative values from the dataset.
+
+Furthermore, observing the maximum and 50th percentile values, it's possible that the data contains significant outliers, particularly high values. These outliers need to be addressed and removed to ensure the integrity of the analysis.
+```{r}
+filtered_data <- filtered_data[filtered_data$fare_amount > 0,]
+filtered_data <- filtered_data[filtered_data$trip_distance > 0,]
+filtered_data <- filtered_data[filtered_data$duration > 0,]
+summary(filtered_data)
+```
+```{r}
+ggplot(filtered_data, aes(x = payment_type, y = fare_amount, fill = payment_type)) +
+    geom_boxplot(outlier.color = "red", outlier.shape = 1) +  # Highlighted outliers in red
+    scale_fill_manual(values = c("skyblue", "lightgreen")) +  # Custom colors for boxes
+    labs(title = "Boxplot of Fare Amounts by Payment Type",
+         x = "Payment Type",
+         y = "Fare Amount") +
+    theme_minimal()  # Clean theme for better readability
+```
+```{r}
+# removing outliers using interquartile range for the numerical variables.
+for (col in c("fare_amount", "trip_distance", "duration")) {
+  Q1 <- quantile(filtered_data[[col]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(filtered_data[[col]], 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR
+  
+  filtered_data <- filtered_data[filtered_data[[col]] >= lower_bound & filtered_data[[col]] <= upper_bound, ]
+}
+
+filtered_data
+
+```
+We're interested on exploring the relationship between payment type and passenger behavior concerning trip distance and fare amount. Are there variations in the distribution of payment types concerning different fare amounts or trip distances?
+
+To investigate this, we'll plot histograms to visualize the distribution of passenger counts paying with either card or cash. This will also provide stakeholders with insight into fare amount ranges associated with different payment methods.
+```{r}
+install.packages("ggplot2")
+install.packages("gridExtra")
+library(ggplot2)
+library(dplyr)
+# Plotting histogram for fare_amount based on payment_type
+p1 <- ggplot(filtered_data, aes(x = fare_amount, fill = payment_type)) +
+  geom_histogram(data = filtered_data %>% filter(payment_type == "card"), 
+                 bins = 20, alpha = 0.5, position = "identity", color = "black") +
+  geom_histogram(data = filtered_data %>% filter(payment_type == "cash"), 
+                 bins = 20, alpha = 0.5, position = "identity", color = "black") +
+  labs(title = "Distribution of Fare Amount", x = "Fare Amount", y = "Count") +
+  scale_fill_brewer(palette = "Set1") +  # Using a Brewer color palette
+  theme_minimal() +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(title = "Payment Type")) # Ensuring legend for payment type
+# Plotting histograms for trip_distance based on payment_type
+p2 <- ggplot(filtered_data, aes(x = trip_distance, fill = payment_type)) +
+  geom_histogram(data = filtered_data %>% filter(payment_type == "card"), 
+                 bins = 20, alpha = 0.5, position = "identity", color = "black") +
+  geom_histogram(data = filtered_data %>% filter(payment_type == "cash"), 
+                 bins = 20, alpha = 0.5, position = "identity", color = "black") +
+  labs(title = "Distribution of Trip Distance", x = "Trip Distance", y = "Count") +
+  scale_fill_brewer(palette = "Set1") +  # Using a Brewer color palette
+  theme_minimal() +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(title = "Payment Type")) # Ensuring legend for payment type
+# To place plots in a grid layout
+library(gridExtra)
+grid.arrange(p1, p2, nrow = 2)
+```
+```{r}
+library(dplyr)
+result <- filtered_data %>%
+  group_by(payment_type) %>%
+  summarise(
+    fare_amount_mean = mean(fare_amount, na.rm = TRUE),
+    fare_amount_std = sd(fare_amount, na.rm = TRUE),
+    trip_distance_mean = mean(trip_distance, na.rm = TRUE),
+    trip_distance_std = sd(trip_distance, na.rm = TRUE)
+  )
+
+# View the result
+print(result)
+```
+Now, in order to examine the passenger's preference regarding their choice of payment method, we will assess the proportion of the two payment types. To provide a visual representation, we have opted to utilize a pie chart. This graphical depiction will offer a clear and intuitive understanding of the distribution between the two payment methods chosen by passengers.
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Calculate the proportions for each payment type and prepare labels
+payment_type_summary <- filtered_data %>%
+  count(payment_type) %>%
+  mutate(prop = n / sum(n),
+         label = sprintf("%s (%.1f%%)", payment_type, 100 * prop))  # Creating labels with percentages
+
+# Create the pie chart with labels
+pie_chart <- ggplot(payment_type_summary, aes(x = "", y = prop, fill = payment_type)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), # Center labels within slices
+            size = 5, color = "white", fontface = "bold") +
+  labs(title = "Preference of Payment Type", x = NULL, y = NULL) +
+  scale_fill_brewer(palette = "Set2") +  # Using a ColorBrewer palette
+  theme_void()
+
+# Display the plot
+print(pie_chart)
+```
+
+```{r}
+library(dplyr)
+passenger_count <- filtered_data %>%
+  group_by(payment_type, passenger_count) %>%
+  summarise(count = n(), .groups = 'drop')
+
+# Calculate the total count for normalization
+total_count <- sum(passenger_count$count)
+
+# Calculate percentage
+passenger_count <- passenger_count %>%
+  mutate(perc = (count / total_count * 100))
+
+# Display the result
+print(passenger_count)
+```
+Subsequently, we aim to conduct an analysis of the payment types in relation to the passenger count. Our objective is to investigate if there are any changes in preference contingent upon the number of passengers traveling in the cab.
+
+To facilitate this examination, we have employed a visualization technique known as a stacked bar plot. This method is particularly advantageous for comparing the percentage distribution of each passenger count based on the payment method selected. Through this graphical representation, we can gain insights into potential variations in payment preferences across different passenger counts.
+ 
+```{r}
+# Plotting
+ggplot(data = passenger_count, aes(x = payment_type, y = perc, fill = as.factor(passenger_count))) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(label = paste0(round(perc, 1), "%")),   # Adding labels with percentage sign
+            position = position_stack(vjust = 0.5),    # This centers the labels in the middle of each bar segment
+            color = "black", size = 3.5,               # Adjust text color and size for visibility
+            check_overlap = TRUE) +                    # Avoids overlapping of text
+  labs(y = "Percentage", x = "Payment Type", fill = "Passenger Count") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Reds")  # Using a color palette for better aesthetics
+```
+Hypothesis Testing
+
+
+In order to select the most suitable test for our scenario, our initial step involves evaluating whether the distribution of fare amounts adheres to a normal distribution. While the histogram depicted above suggests otherwise, we will further confirm this by generating a QQ plot.
+
+Quantile-quantile (QQ) plots can be used to assess whether the fare amount distributions for each payment type are approximately normally distributed. If the data points closely align with the diagonal line in the plot, it suggests that the data follows a normal distribution.
+```{r}
+qqnorm(filtered_data$fare_amount, main = "Q-Q plot of fare amount")
+qqline(filtered_data$fare_amount, col = "red", lty = 1)  # Adds a reference line
+```
+The data values clearly do not follow the red 45-degree line, which is an indication that they do not follow a normal distribution. So, z distribution will not be good for this. That's why we will use T test.
+
+Given that the T-test can be applied to both small and large samples and does not require the population standard deviation, it is a more universally applicable approach for hypothesis testing in many practical research scenarios, including analyses of taxi trip data.
+
+In the analysis of NYC Yellow Taxi Trip Records, where you're likely dealing with an unknown population standard deviation and potentially large datasets, the T-test offers a more appropriate and flexible method for comparing means between two groups (e.g., fare amounts by payment type). It provides a reliable way to infer about the population, accommodating the uncertainty that comes with estimating population parameters from sample data.
+
+Null hypothesis: There is no difference in average fare between customers who use credit cards and customers who use cash.
+
+Alternative hypothesis: There is a difference in average fare between customers who use credit cards and customers who use cash.
+```{r}
+# Perform Welch's t-test
+test_result <- t.test(card_sample, cash_sample, alternative = "two.sided", var.equal = FALSE)
+
+# Enhanced printing of the results
+cat("Welch's t-test Results:\n")
+cat("--------------------------------------------------\n")
+cat(sprintf("t-statistic: %.3f\n", test_result$statistic))
+cat(sprintf("Degrees of Freedom: %.2f\n", test_result$parameter))
+cat(sprintf("p-value: %.5f\n", test_result$p.value))
+cat(sprintf("Confidence Interval: [%.2f, %.2f]\n", test_result$conf.int[1], test_result$conf.int[2]))
+cat(sprintf("Estimate of difference (mean of card - mean of cash): %.2f\n", diff(test_result$estimate)))
+
+```
+```{r}
+card_sample <- filtered_data[filtered_data$payment_type == 'card', 'fare_amount']
+cash_sample <- filtered_data[filtered_data$payment_type == 'cash', 'fare_amount']
+
+# Perform Welch's t-test
+test_result <- t.test(card_sample, cash_sample, alternative = "two.sided", var.equal = FALSE)
+
+# Print the results
+print(test_result)
+```
+Conclusion:
+
+T-Statistic (169.21): This high value indicates a significant difference in the means of the two groups. It suggests that the average fare amounts for credit card and cash users are not close to each other.
+
+P-Value (< 2.2e-16): This extremely low p-value shows that the probability of observing such a large difference in averages if the null hypothesis were true is virtually zero. This means it's very unlikely that these differences occurred by chance.
+
+Confidence Interval (1.338798 to 1.370176): This interval does not include zero, which further supports a true difference in mean fares between the groups. It specifically indicates that the average fare for credit card users is higher than for cash users by approximately 1.34 to 1.37 units.
+
+These results strongly suggest that the null hypothesis (no difference in average fares between payment types) is incorrect. Thus accepting the alternative hypothesis, which states that there is a significant difference in average fares between customers who pay with credit cards and those who pay with cash.
+
+Recommendations:
+
+Promote Card Payments: Encourage more passengers to use credit cards by possibly offering loyalty points or discounts on future rides. This could increase customer retention and higher fare collections.
+
+Adjust Fare Policies: Review and possibly adjust fare policies to ensure fairness and transparency, particularly in how surcharges are applied to payments made via different methods. This could help maintain trust and satisfaction among cash users.
+
+Enhanced Services for Card Users: Since card users tend to spend more, consider offering them premium services, such as Wi-Fi enabled rides, choice of music, or more comfortable cars as part of a loyalty program that encourages continued use of credit cards.
+
+Streamline Payment Processes: Invest in technology to make card payments as quick and easy as cash transactions to encourage more users to switch to card payments, potentially increasing overall revenue.
+```{r}
+# Load necessary library
+library(MASS)
+# Fit the robust regression model
+robust_model <- rlm(fare_amount ~ duration, data = filtered_data)
+
+# Generate the summary of the robust model
+model_summary <- summary(robust_model)
+
+print(model_summary)
+
+```
+The regression model indicates a strong positive relationship between trip duration and fare amount. For each additional unit of duration, fare amount increases by approximately 0.6658 units. The model has a high level of statistical significance, with a t-value of 3559.4981 for the duration coefficient. The intercept term suggests a base fare amount of approximately 2.4254 units. The model's residual standard error is 1.829, indicating the average difference between observed and predicted fare amounts.
+```{r}
+# Or, for the robust model
+par(mfrow = c(2, 2))
+plot(robust_model)
+```
+Conclusion:
+
+Strong Relationship: The significant coefficients for duration in the robust linear regression model indicates a strong and positive relationship between the duration of a ride and the fare amount. As the duration increases, the fare also tends to increase.
+
+Model Effectiveness: The lack of patterns in the Residuals vs Fitted plot and the stable variance in the Scale-Location plot suggest that the robust linear regression model effectively captures this relationship without being unduly influenced by outliers or other data anomalies.
+
+Reliability: The absence of influential outliers, as indicated in the Residuals vs Leverage plot, along with a general adherence of residuals to normality (with some exceptions in the tails), supports the reliability of the model’s predictions.
+
+Summary:
+The analysis shows that ride duration is a reliable predictor of fare amount, with longer rides generally costing more. The robust regression model is well-suited for making predictions or decisions based on this data, despite any potential data irregularities.
+
+
+
+
+
+
